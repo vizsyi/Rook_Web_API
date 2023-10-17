@@ -1,0 +1,12 @@
+# dependencies
+
+# Compiled source
+Rook01/bin
+
+# ASP.NET Core Web API project template
+Rook01/obj
+
+# misc
+.vs
+.dockerignore
+Rook01/Dockerfile
