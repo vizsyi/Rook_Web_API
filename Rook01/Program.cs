@@ -144,5 +144,6 @@ app.UseAuthorization();
 app.MapControllers();
 
 GMailer.SetMailbox(builder.Configuration);
+ApplicationDBInitializer.Seed(app).Wait();
 
 app.Run();
