@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Identity;
 using Rook01.Models.Auth.DTOs;
+using Rook01.Services.Auth;
 using System.ComponentModel.DataAnnotations;
 
 namespace Rook01.Models.Auth
@@ -11,9 +12,8 @@ namespace Rook01.Models.Auth
         }
         public ApplicationUser(RegisterDTO model) : base(model.UserName)
         {
-            //this.Id = Guid.NewGuid().ToString();
-            //this.UserName= model.UserName;
             this.Email= model.Email;
+            this.UserKey = Chid.NewChid(64, 8);
             //this.SecurityStamp = Guid.NewGuid().ToString(); //todo: test
         }
 
@@ -21,7 +21,5 @@ namespace Rook01.Models.Auth
         [StringLength(8)]
         public string UserKey { get; set; }
 
-        //[Required]
-        //public string NormalizedPetname { get; set; } = "";
     }
 }
