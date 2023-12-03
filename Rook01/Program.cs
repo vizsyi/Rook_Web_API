@@ -7,6 +7,8 @@ using Microsoft.OpenApi.Models;
 using Rook01.Data;
 using Rook01.Data.EF;
 using Rook01.Models.Auth;
+using Rook01.Services.EMail;
+
 //using Rook01.Services.EMail;
 using System.Text;
 
@@ -140,5 +142,7 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+GMailer.SetMailbox(builder.Configuration);
 
 app.Run();
