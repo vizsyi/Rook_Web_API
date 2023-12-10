@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+﻿using Dapper;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Rook01.Data.Dapper;
 using Rook01.Data.EF;
 using Rook01.Models.Auth;
 using Rook01.Models.Auth.Constans;
@@ -14,6 +16,7 @@ using Rook01.Models.Auth.Tokens;
 using Rook01.Models.Auth.Tokens.DTOs;
 using Rook01.Services.Auth;
 using Rook01.Services.EMail.Views;
+using System.Data;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
@@ -28,16 +31,18 @@ namespace Rook01.Controllers
         private readonly SignInManager<ApplicationUser> signInManager;
         private readonly ApplicationDBContext context;
         private readonly IConfiguration configuration;
-        private readonly TokenValidationParameters tokenValidationParameters;
+        //private readonly TokenValidationParameters tokenValidationParameters;
+        private readonly DataContextDapper dapper;
 
         public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager
-            , ApplicationDBContext context, IConfiguration configuration, TokenValidationParameters tokenValidationParameters)
+            , ApplicationDBContext context, IConfiguration configuration)//, TokenValidationParameters tokenValidationParameters)
         {
             this.userManager = userManager;
             this.signInManager = signInManager;
             this.context = context;
             this.configuration = configuration;
-            this.tokenValidationParameters = tokenValidationParameters;
+            //this.tokenValidationParameters = tokenValidationParameters;
+            this.dapper = new DataContextDapper(configuration);
         }
 
         [AllowAnonymous]
@@ -105,69 +110,77 @@ namespace Rook01.Controllers
             return new NotFoundResult();
         }
 
-        private async Task<AuthResult> GenerateJwtTokenAsync(ApplicationUser user, string existingRefreshToken)
+        private async Task<RefreshToken> GenerateRefreshTokenAsync(string userKey, int userId)
+        {
+            var refreshToken = new RefreshToken()
+            {
+                UserKey = userKey,
+                UserId = userId,
+                SecKey = Chid.NewChid(64, 7),
+                LongToken = Chid.NewChid(64, 5) + "<" + Chid.NewChid(64, 6),
+                DateExpire = DateTime.UtcNow.AddMinutes(79),
+                IsRevoked = false
+            };
+
+            string sqlComm = "EXEC Auth.SP_RefreshT_Ups @userKey=@userKeyP, @userId=@userIdP"
+                + ",@secKey=@secKeyP, @longToken=@longTokenP, @dateExpire=@dateExpireP";
+            DynamicParameters dparams = new();
+            dparams.Add("@userKeyP", refreshToken.UserKey, DbType.String);
+            dparams.Add("@userIdP", refreshToken.UserId, DbType.Int32);
+            dparams.Add("@secKeyP", refreshToken.SecKey, DbType.String);
+            dparams.Add("@longTokenP", refreshToken.LongToken, DbType.String);
+            dparams.Add("@dateExpireP", refreshToken.DateExpire, DbType.DateTime);
+
+            dapper.ExecuteWithParametersAsync(sqlComm, dparams);//todo: handle the result
+            //dapper.ExecuteWithParameters("Auth.SP_RefreshT_Ups", dparams);
+
+            //await context.RefreshToken.AddAsync(refreshToken);
+            //await context.SaveChangesAsync();//todo: with storedprocedure
+
+            return refreshToken;
+        }
+
+        private async Task<AuthResult> GenerateJwtTokenAsync(RefreshToken refreshToken, bool isNewRefreshToken = false)
         {
             var authClaims = new List<Claim>()
             {
-                new Claim(ClaimTypes.Name, user.UserName),
-                new Claim(ClaimTypes.NameIdentifier, user.UserKey),
-                new Claim(JwtRegisteredClaimNames.Email, user.Email),
-                new Claim(JwtRegisteredClaimNames.Name , user.UserName),
-                new Claim(JwtRegisteredClaimNames.Jti , user.UserName),
-                new Claim("role", UserRoles.Admin),
-                new Claim("role", UserRoles.CelebEditor),
-                new Claim("role", UserRoles.Custom),
-                new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+                new Claim(JwtRegisteredClaimNames.NameId , refreshToken.UserKey),
+                new Claim(JwtRegisteredClaimNames.Nonce, refreshToken.SecKey)
              };
 
-            var SigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["JWT:Key"]));
+            //Add user roles
+            string sqlComm = "EXEC Auth.SP_RolesGetByUserId @userId = @userIdP";
+            DynamicParameters dparams = new();
+            dparams.Add("@userIdP", refreshToken.UserId, DbType.Int32);
 
+            var userRoles = await dapper.LoadDataWithParametersAsync<string>(sqlComm, dparams);
+            //var userRoles = await userManager.GetRolesAsync(user);
+            foreach(var role in userRoles)
+            {
+                authClaims.Add(new Claim("role", role));
+            }
+
+            var SigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(configuration["JWT:Key"]));
             var token = new JwtSecurityToken(
                 issuer : configuration["JWT:Issuer"],
                 audience : configuration["JWT:Audience"],
                 claims: authClaims,
-                expires: DateTime.UtcNow.AddMinutes(71),
+                expires: DateTime.UtcNow.AddSeconds(457),
                 signingCredentials: new SigningCredentials(SigningKey, SecurityAlgorithms.HmacSha256)
                 );
 
             var jwtToken = new JwtSecurityTokenHandler().WriteToken(token);
 
-            string refreshTokenValue;
-
-            if (String.IsNullOrEmpty(existingRefreshToken))
-            {
-                var refreshToken = new RefreshToken()
-                {
-                    UserKey = user.UserKey,
-                    UserId = user.Id,
-                    SecKey = Chid.NewFullChid(7),
-                    LongToken = Chid.NewFullChid(5) + "<" + Chid.NewFullChid(6),
-                    DateExpire = DateTime.UtcNow.AddHours(6),
-                    IsRevoked = false
-                };
-
-                await context.RefreshToken.AddAsync(refreshToken);
-                await context.SaveChangesAsync();
-
-                refreshTokenValue = refreshToken.LongToken;
-            }
-            else
-            {
-                refreshTokenValue = existingRefreshToken;
-            }
-
-            var response = new AuthResult()
+            return new AuthResult()
             {
                 Token = jwtToken,
-                RefreshToken = refreshTokenValue,
+                RefreshToken = isNewRefreshToken ? refreshToken.LongToken : "",
                 DateExpire = token.ValidTo
             };
-
-            return response;
         }
 
         [AllowAnonymous]
-        [HttpPost("user-login")]
+        [HttpPost("login")]
         public async Task<IActionResult> Login(LoginDTO model)
         {
             if (!ModelState.IsValid)
@@ -175,22 +188,55 @@ namespace Rook01.Controllers
                 return BadRequest("Please provide all required fields");
             }
 
+            //todo: e-mail or username
             var user = await userManager.FindByEmailAsync(model.Email);
 
             if (user != null && await userManager.CheckPasswordAsync(user, model.Password))
             {
-                var authTokens = await GenerateJwtTokenAsync(user, null);
-                return Ok(authTokens);
+                return Ok(await GenerateJwtTokenAsync(await GenerateRefreshTokenAsync(user.UserKey, user.Id), true));
             }
 
             return Unauthorized();
         }
 
-        [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+        //[Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+        [AllowAnonymous]
         [HttpPost("refresh-token")]
         public async Task<IActionResult> RefreshToken([FromBody] TokenRequest model)
         {
-            return Ok();
+            //if (!ModelState.IsValid)
+            //{
+            //    return BadRequest("Please provide all required fields");
+            //}
+
+            var jwtNid = JwtRegisteredClaimNames.NameId;
+            var jwtNid2 = ClaimTypes.NameIdentifier;
+            var jwtNonce = JwtRegisteredClaimNames.Nonce;
+            //var jwtExp = JwtRegisteredClaimNames.Exp;
+            var keyClaim = User.Claims.FirstOrDefault(c => (c.Type == jwtNid2 || c.Type == jwtNid));
+            var secClaim = User.Claims.FirstOrDefault(c => c.Type == jwtNonce);
+            //var expClaim = User.Claims.FirstOrDefault(c => c.Type == jwtExp);
+
+            if (keyClaim != null && secClaim != null)
+            {
+                var userKey = keyClaim.Value;
+                var refreshToken = context.RefreshToken.FirstOrDefault(rt => rt.UserKey == userKey);
+                if (refreshToken != null && model.RefreshToken == refreshToken.LongToken)
+                {
+                    var equ = secClaim.Value == refreshToken.SecKey;//todo: checking
+                    var user = await userManager.FindByIdAsync(refreshToken.UserId.ToString());//todo: delete
+
+                    if (refreshToken.DateExpire <  DateTime.UtcNow.AddMinutes(24))
+                    {
+                        return Ok(await GenerateJwtTokenAsync(
+                            await GenerateRefreshTokenAsync(refreshToken.UserKey, refreshToken.UserId), true));
+                    }
+                    return Ok(await GenerateJwtTokenAsync(refreshToken));
+                }
+            }
+
+            var i = 1;
+            return Unauthorized();
         }
 
         private DateTime UnixTimeStampToDateInUTC(long unixTimeStamp)
