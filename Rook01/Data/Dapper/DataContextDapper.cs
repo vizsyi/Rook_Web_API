@@ -12,38 +12,38 @@ namespace Rook01.Data.Dapper
         public DataContextDapper(IConfiguration config)
         {
             //_config = config;
-            _connStr = config.GetConnectionString("DefaultConnection");
+            this._connStr = config.GetConnectionString("DefaultConnection");
         }
 
-        public IEnumerable<T> LoadData<T>(string sql)
+        public async Task<IEnumerable<T>> LoadDataAsync<T>(string sql)
         {
             IDbConnection connection = new SqlConnection(_connStr);
-            return connection.Query<T>(sql);
+            return await connection.QueryAsync<T>(sql);
         }
 
-        public IEnumerable<T> LoadDataWithParameters<T>(string sql, List<SqlParameter> parameters)
+        public async Task<IEnumerable<T>> LoadDataWithParametersAsync<T>(string sql, DynamicParameters parameters)
         {
             IDbConnection connection = new SqlConnection(_connStr);
-            return connection.Query<T>(sql, parameters);
+            return await connection.QueryAsync<T>(sql, parameters);
         }
 
-        public T LoadDataSingle<T>(string sql)
+        public async Task<T> LoadDataSingleAsync<T>(string sql)
         {
             IDbConnection connection = new SqlConnection(_connStr);
-            return connection.QuerySingle<T>(sql);
+            return await connection.QuerySingleAsync<T>(sql);
         }
 
-        public bool ExecuteSql(string sql)
+        public async Task<T> LoadDataSingleWithParametersAsync<T>(string sql, DynamicParameters parameters)
         {
             IDbConnection connection = new SqlConnection(_connStr);
-            return connection.Execute(sql) > 0;
+            return await connection.QuerySingleAsync<T>(sql, parameters);
         }
 
         //public bool ExecuteWithParameters(string sql, List<SqlParameter> parameters)
-        public bool ExecuteWithParameters(string sql, DynamicParameters parameters)
+        public async Task<bool> ExecuteWithParametersAsync(string sql, DynamicParameters parameters)
         {
             IDbConnection connection = new SqlConnection(_connStr);
-            return connection.Execute(sql, parameters) > 0;
+            return (await connection.ExecuteAsync(sql, parameters)) > 0;//todo: ? the importance of the > 0 in case of SP
         }
     }
 }

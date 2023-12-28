@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Rook01.Data;
+using Rook01.Data.Dapper;
 using Rook01.Data.EF;
 using Rook01.Models.Auth;
 using Rook01.Services.EMail;
@@ -94,6 +95,7 @@ builder.Services.AddAuthentication(option =>
 
 //Program services
 //builder.Services.AddSingleton<IEMailer, GMailer>();
+builder.Services.AddScoped<DataContextDapper>();
 
 builder.Services.AddControllers();
 // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
