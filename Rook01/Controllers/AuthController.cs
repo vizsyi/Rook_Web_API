@@ -9,6 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Rook01.Data.Dapper;
 using Rook01.Data.EF;
+using Rook01.Filters.Authentication;
 using Rook01.Models.Auth;
 using Rook01.Models.Auth.Constans;
 using Rook01.Models.Auth.DTOs;
@@ -131,7 +132,7 @@ namespace Rook01.Controllers
             dparams.Add("@longTokenP", refreshToken.LongToken, DbType.String);
             dparams.Add("@dateExpireP", refreshToken.DateExpire, DbType.DateTime);
 
-            dapper.ExecuteWithParametersAsync(sqlComm, dparams);//todo: handle the result
+            await dapper.ExecuteWithParametersAsync(sqlComm, dparams);//todo: handle the result
             //dapper.ExecuteWithParameters("Auth.SP_RefreshT_Ups", dparams);
 
             //await context.RefreshToken.AddAsync(refreshToken);
@@ -199,40 +200,27 @@ namespace Rook01.Controllers
             return Unauthorized();
         }
 
-        //[Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
-        [AllowAnonymous]
+        [Authorize(AuthenticationSchemes = JwtBearerDefaults.AuthenticationScheme)]
+        [CheckTokenFilterFactory]
         [HttpPost("refresh-token")]
         public async Task<IActionResult> RefreshToken([FromBody] TokenRequest model)
         {
-            //if (!ModelState.IsValid)
-            //{
-            //    return BadRequest("Please provide all required fields");
-            //}
-
-            var jwtNid = JwtRegisteredClaimNames.NameId;
-            var jwtNid2 = ClaimTypes.NameIdentifier;
-            var jwtNonce = JwtRegisteredClaimNames.Nonce;
-            //var jwtExp = JwtRegisteredClaimNames.Exp;
-            var keyClaim = User.Claims.FirstOrDefault(c => (c.Type == jwtNid2 || c.Type == jwtNid));
-            var secClaim = User.Claims.FirstOrDefault(c => c.Type == jwtNonce);
-            //var expClaim = User.Claims.FirstOrDefault(c => c.Type == jwtExp);
-
-            if (keyClaim != null && secClaim != null)
+            if (!ModelState.IsValid)
             {
-                var userKey = keyClaim.Value;
-                var refreshToken = context.RefreshToken.FirstOrDefault(rt => rt.UserKey == userKey);
-                if (refreshToken != null && model.RefreshToken == refreshToken.LongToken)
-                {
-                    var equ = secClaim.Value == refreshToken.SecKey;//todo: checking
-                    var user = await userManager.FindByIdAsync(refreshToken.UserId.ToString());//todo: delete
+                return BadRequest("Please provide all the required fields");
+            }
 
-                    if (refreshToken.DateExpire <  DateTime.UtcNow.AddMinutes(24))
-                    {
-                        return Ok(await GenerateJwtTokenAsync(
-                            await GenerateRefreshTokenAsync(refreshToken.UserKey, refreshToken.UserId), true));
-                    }
-                    return Ok(await GenerateJwtTokenAsync(refreshToken));
+            var refreshToken = HttpContext.Items["RefreshToken"] as RefreshToken;
+
+            if (refreshToken != null && model.RefreshToken == refreshToken.LongToken)
+            {
+
+                if (refreshToken.DateExpire < DateTime.UtcNow.AddMinutes(24))
+                {
+                    return Ok(await GenerateJwtTokenAsync(
+                        await GenerateRefreshTokenAsync(refreshToken.UserKey, refreshToken.UserId), true));
                 }
+                return Ok(await GenerateJwtTokenAsync(refreshToken));
             }
 
             var i = 1;
